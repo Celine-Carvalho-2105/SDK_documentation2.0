@@ -85,7 +85,7 @@ REQUIRED STRUCTURE - output exactly these sections, in this order:
 
 Do not add any section not listed above."""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1200)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1000)
 
     def generate_installation(self, analysis: Dict, files: List[Dict]) -> str:
         setup_content = ""
@@ -154,7 +154,7 @@ REQUIRED STRUCTURE:
 
 Do not add any section not listed above."""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1500)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=900)
 
     def generate_api_docs(self, analysis: Dict) -> str:
         ctx = self._retrieve_context(
@@ -235,7 +235,7 @@ result = instance.method_name(...)
 
 (Repeat File / Class / Function blocks for every file present in the context.)"""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=2048)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1200)
 
     def generate_architecture_doc(self, analysis: Dict) -> str:
         ctx = self._retrieve_context(
@@ -288,7 +288,7 @@ REQUIRED STRUCTURE:
 
 Do not add any section not listed above."""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=2000)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1000)
 
     def generate_usage_guide(self, analysis: Dict) -> str:
         ctx = self._retrieve_context(
@@ -349,7 +349,7 @@ REQUIRED STRUCTURE:
 
 Do not add any section not listed above."""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1500)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1000)
 
     def generate_configuration_doc(self, analysis: Dict, files: List[Dict]) -> Optional[str]:
         config_files = [
@@ -397,7 +397,7 @@ REQUIRED STRUCTURE:
 
 Do not add any section not listed above."""
 
-        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=1500)
+        return self.llm.simple_prompt(prompt, system=SYSTEM_PROMPT, max_tokens=800)
 
 
 def _fmt_analysis(analysis: Dict) -> str:

@@ -79,13 +79,13 @@ class LLMClient:
                     attempt + 1,
                     MAX_RETRIES,
                 )
-                time.sleep(wait)
+                time.sleep(2)
                 last_error = e
 
             except APIConnectionError as e:
                 wait = BASE_BACKOFF * (attempt + 1)
                 logger.warning(f"Connection error: {e}. Retrying in {wait}s...")
-                time.sleep(wait)
+                time.sleep(2)
                 last_error = e
 
             except APIError as e:

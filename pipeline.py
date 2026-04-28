@@ -1,37 +1,32 @@
 """
 pipeline.py
-Central orchestrator — coordinates all agents through the documentation pipeline.
+Central orchestrator for the documentation pipeline.
 """
 
 import logging
-from typing import List, Dict, Callable, Optional
+from typing import Callable, Dict, List, Optional
 
-from utils.llm_client import LLMClient
-from rag.retriever import VectorStore, chunk_file
 from agents.analyzer import AnalyzerAgent
 from agents.doc_generator import DocGeneratorAgent
-from agents.example_generator import ExampleGeneratorAgent
-from agents.validator import ValidatorAgent
-from output.formatter import format_markdown, format_html, format_json
+from output.formatter import format_html, format_json, format_markdown
+from rag.retriever import VectorStore, chunk_file
+from utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
 class DocumentationPipeline:
     """
-    Orchestrates the full documentation generation pipeline:
-    Ingest → Chunk → Embed → Analyze → Generate → Validate → Format
+    Orchestrates a rate-limit-friendly documentation pipeline:
+    Ingest -> Chunk -> Embed -> Analyze -> Generate -> Format
     """
 
     def __init__(self, groq_api_key: str):
         self.llm = LLMClient(api_key=groq_api_key)
         self.vector_store = VectorStore()
 
-        # Initialize agents
         self.analyzer = AnalyzerAgent(self.llm, self.vector_store)
         self.doc_generator = DocGeneratorAgent(self.llm, self.vector_store)
-        self.example_generator = ExampleGeneratorAgent(self.llm, self.vector_store)
-        self.validator = ValidatorAgent(self.llm)
 
     def run(
         self,
@@ -41,7 +36,7 @@ class DocumentationPipeline:
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> str:
         """
-        Execute the full pipeline.
+        Execute the pipeline.
 
         Args:
             files: List of file dicts with path, content, extension
@@ -50,27 +45,24 @@ class DocumentationPipeline:
             progress_callback: fn(message: str, percent: int)
 
         Returns:
-            Generated documentation string in requested format
+            Generated documentation string in requested format.
         """
 
         def update(msg: str, pct: int):
-            logger.info(f"[{pct}%] {msg}")
+            logger.info("[%s%%] %s", pct, msg)
             if progress_callback:
                 progress_callback(msg, pct)
 
-        # ── Step 1: Chunk all files ─────────────────────────────────────────
         update("Chunking source files for analysis...", 5)
         all_chunks = []
-        for f in files:
-            chunks = chunk_file(f)
-            all_chunks.extend(chunks)
+        for file_info in files:
+            all_chunks.extend(chunk_file(file_info))
 
         if not all_chunks:
             raise ValueError("No content could be extracted from the provided files.")
 
         update(f"Created {len(all_chunks)} content chunks from {len(files)} files.", 10)
 
-        # ── Step 2: Build vector store (RAG) ───────────────────────────────
         update("Building embedding index (RAG)...", 15)
 
         def embed_progress(done, total):
@@ -80,50 +72,37 @@ class DocumentationPipeline:
         self.vector_store.build(all_chunks, progress_callback=embed_progress)
         update("Vector index ready.", 30)
 
-        # ── Step 3: Analyze project ─────────────────────────────────────────
         update("Analyzer Agent: Understanding project structure...", 35)
         analysis = self.analyzer.analyze(files, project_name)
         update(f"Analysis complete: {analysis.get('architecture', '?')} project detected.", 42)
 
-        # ── Step 4: Generate documentation sections ─────────────────────────
         sections: Dict[str, str] = {}
 
-        update("Doc Generator: Writing project overview...", 45)
+        update("Doc Generator: Writing project overview...", 48)
         sections["overview"] = self.doc_generator.generate_overview(analysis)
 
-        update("Doc Generator: Writing installation guide...", 52)
+        update("Doc Generator: Writing installation guide...", 58)
         sections["installation"] = self.doc_generator.generate_installation(analysis, files)
 
-        update("Doc Generator: Writing usage guide...", 58)
+        update("Doc Generator: Writing usage guide...", 68)
         sections["usage_guide"] = self.doc_generator.generate_usage_guide(analysis)
 
-        update("Doc Generator: Writing API reference...", 64)
-        sections["api_docs"] = self.doc_generator.generate_api_docs(analysis)
-
-        update("Doc Generator: Writing architecture docs...", 70)
+        update("Doc Generator: Writing architecture docs...", 78)
         sections["architecture"] = self.doc_generator.generate_architecture_doc(analysis)
 
-        # ── Step 5: Example generator ───────────────────────────────────────
-        update("Example Generator: Creating usage examples...", 76)
-        sections["examples"] = self.example_generator.generate_examples(analysis)
+        # API docs are useful but token-heavy. Keep them, but make failures non-fatal.
+        update("Doc Generator: Writing compact API reference...", 86)
+        try:
+            sections["api_docs"] = self.doc_generator.generate_api_docs(analysis)
+        except RuntimeError as exc:
+            logger.warning("Skipping API docs after LLM error: %s", exc)
+            sections["api_docs"] = _api_docs_fallback(analysis)
 
-        # ── Step 6: Optional configuration docs ────────────────────────────
-        update("Doc Generator: Writing configuration docs...", 80)
-        config_doc = self.doc_generator.generate_configuration_doc(analysis, files)
-        if config_doc:
-            sections["configuration"] = config_doc
+        update("Adding local contributing guide and changelog...", 92)
+        sections["contributing"] = _contributing_fallback(analysis)
+        sections["changelog"] = _changelog_fallback(analysis)
 
-        # ── Step 7: Validator agent ─────────────────────────────────────────
-        update("Validator: Reviewing and improving documentation quality...", 84)
-        sections = self.validator.validate_and_improve(sections, analysis)
-
-        # ── Step 8: Add supplementary sections ─────────────────────────────
-        update("Adding contributing guide and changelog...", 90)
-        sections["contributing"] = self.validator.generate_contributing_guide(analysis)
-        sections["changelog"] = self.validator.generate_changelog_stub(analysis)
-
-        # ── Step 9: Format output ───────────────────────────────────────────
-        update(f"Formatting output as {output_format.upper()}...", 95)
+        update(f"Formatting output as {output_format.upper()}...", 96)
         fmt = output_format.lower()
         if fmt == "html":
             result = format_html(sections, analysis)
@@ -132,5 +111,56 @@ class DocumentationPipeline:
         else:
             result = format_markdown(sections, analysis)
 
-        update("Documentation generation complete! ✅", 100)
+        update("Documentation generation complete!", 100)
         return result
+
+
+def _api_docs_fallback(analysis: Dict) -> str:
+    components = analysis.get("key_components", [])
+    lines = ["## API Reference", ""]
+
+    if not components:
+        lines.append("<!-- not determinable from code -->")
+        return "\n".join(lines)
+
+    lines.extend(["| Component | File | Description |", "|-----------|------|-------------|"])
+    for component in components[:8]:
+        lines.append(
+            "| {name} | `{file}` | {description} |".format(
+                name=component.get("name", "unknown"),
+                file=component.get("file", "unknown"),
+                description=component.get("description", "<!-- not determinable from code -->"),
+            )
+        )
+
+    return "\n".join(lines)
+
+
+def _contributing_fallback(analysis: Dict) -> str:
+    project_name = analysis.get("project_name", "this project")
+    language = analysis.get("language", "the project language")
+
+    return f"""## Contributing
+
+Contributions to {project_name} are welcome.
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Make focused changes that match the existing {language} style.
+4. Run the project's tests or smoke checks before submitting.
+5. Open a pull request with a short summary of the change.
+"""
+
+
+def _changelog_fallback(analysis: Dict) -> str:
+    project_name = analysis.get("project_name", "the project")
+    description = analysis.get("description", "Initial generated documentation.")
+
+    return f"""## Changelog
+
+### v1.0.0 - Initial Release
+- Initial documentation for {project_name}.
+- {description}
+
+> Update this changelog with real version history before release.
+"""
